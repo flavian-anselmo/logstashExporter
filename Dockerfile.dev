@@ -1,0 +1,37 @@
+# Use a slim Debian-based Python image
+FROM python:3.10-slim
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    wget \
+    unzip \
+    curl \
+    xvfb \
+    libxi6 \
+    libgconf-2-4 \
+    libnss3 \
+    libxss1 \
+    libappindicator1 \
+    fonts-liberation \
+    libasound2 \
+    libgbm1 \
+    xdg-utils \
+    chromium \
+    chromium-driver \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Chromium as the default browser
+ENV CHROME_BIN=/usr/bin/chromium
+ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
+ENV CHROMIUM_FLAGS="--no-sandbox --disable-dev-shm-usage"
+
+# Install Python dependencies
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy script
+COPY healthchecks.py .
+
+# Run the script
+CMD ["python", "healthchecks.py"]
