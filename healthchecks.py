@@ -2,109 +2,157 @@ import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
+from pptx import Presentation
+from pptx.util import Inches
 import time
 import logging
-# Function to send an email
-def send_email(subject, body, to_email):
-    from_email = "hi@demomailtrap.com"
-    from_password = "0fa5bfb5fd83f20112de58505c1cc214"
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def send_email(subject, body, to_email, attachment_path=None):
+    from_email = ""
+    from_password = ""
     
-    # Create the email message
     message = MIMEMultipart()
     message["From"] = from_email
     message["To"] = to_email
     message["Subject"] = subject
     message.attach(MIMEText(body, "plain"))
-
+    
+    if attachment_path:
+        with open(attachment_path, 'rb') as attachment:
+            part = MIMEBase('application', 'octet-stream')
+            part.set_payload(attachment.read())
+            encoders.encode_base64(part)
+            part.add_header(
+                'Content-Disposition',
+                f'attachment; filename={os.path.basename(attachment_path)}'
+            )
+            message.attach(part)
+    
     try:
-        # Set up the server and send the email
-        server = smtplib.SMTP("live.smtp.mailtrap.io", 587)
-        server.starttls()  # Enable security
+        server = smtplib.SMTP("smtp.office365.com", 587)
+        server.starttls()
         server.login(from_email, from_password)
         server.sendmail(from_email, to_email, message.as_string())
         server.close()
-        print("Email sent successfully!")
+        logger.info("Email sent successfully!")
     except Exception as e:
-        print(f"Error sending email: {e}")
+        logger.error(f"Error sending email: {e}")
 
-# Define Chrome options
-chrome_options = Options()
-chrome_options.add_argument("--headless")  # Run in headless mode
-chrome_options.add_argument("--disable-gpu")
-chrome_options.add_argument("--no-sandbox")
-chrome_options.add_argument("--disable-dev-shm-usage")
-
-# Initialize WebDriver
-driver = webdriver.Chrome(options=chrome_options)
-
-# Print current working directory to help with troubleshooting
-print(f"Current working directory: {os.getcwd()}")
-
-try:
-    # Open Kibana login page
-    login_url = "http://kibana:5601"
-    driver.get(login_url)
-
-    # Wait for the login page to load
-    time.sleep(5)
-
-    logging.info('started logging in...')
-
-    # Enter login credentials
-    username = driver.find_element(By.NAME, "username")  # Adjust if necessary
-    password = driver.find_element(By.NAME, "password")  # Adjust if necessary
-    username.send_keys("elastic")  # Replace with actual username
-    password.send_keys("kibana123")  # Replace with actual password
-    password.send_keys(Keys.RETURN)  # Press Enter to submit
-
-    logging.info('lockedin....')
-
-
-    # Wait for the dashboard page to load
-    time.sleep(10)
-
-    # List of multiple Kibana dashboard URLs
-    dashboard_urls = [
-        "http://kibana:5601/app/dashboards#/view/722b74f0-b882-11e8-a6d9-e546fe2bba5f?_g=(filters:!())",
-        "http://kibana:5601/app/dashboards#/view/7adfa750-4c81-11e8-b3d7-01146121b73d?_g=(filters:!())"
-    ]
-
-    for i, url in enumerate(dashboard_urls, start=1):
-        logging.info('taking screenshots...')
-        driver.get(url)
-        time.sleep(15) 
-
-        # full-page screenshot
-        total_width = driver.execute_script("return document.body.scrollWidth")
-        total_height = driver.execute_script("return document.body.scrollHeight")
-        driver.set_window_size(total_width, total_height)
-        logging.info(f'H: {total_height} and W: {total_width}')
-
-
-
-        # Capture full-page screenshot and specify the directory to save it
-        screenshot_directory = "/app/screenshots"  # Specify your folder path
-        if not os.path.exists(screenshot_directory):
-            os.makedirs(screenshot_directory)  # Create the directory if it doesn't exist
+def create_powerpoint(screenshot_paths, template_path, output_path):
+    try:
+        # Load the template
+        prs = Presentation(template_path)
         
-        screenshot_path = os.path.join(screenshot_directory, f"kibana_dashboard_{i}.png")
-        driver.get_screenshot_as_file(screenshot_path)
-        logging.info(f"Screenshot saved: {screenshot_path}")
+        # Skip first slide (intro) and add screenshots to slides 2 and 3
+        for i, screenshot_path in enumerate(screenshot_paths):
+            if i < 2:  # Only process first two screenshots
+                slide = prs.slides[i + 1]  # +1 to skip intro slide
+                
+                # Add screenshot to the empty slide
+                # Center the screenshot on the slide
+                left = Inches(2)  # 1 inch margin from left
+                top = Inches(2)   # 1 inch margin from top
+                width = Inches(7)  # 8 inches wide
+                height = Inches(4)  # 5.5 inches high
+                
+                slide.shapes.add_picture(
+                    screenshot_path,
+                    left,
+                    top,
+                    width,
+                    height
+                )
+                logger.info(f"Added screenshot to slide {i + 2}")
+        
+        # Save the presentation
+        prs.save(output_path)
+        logger.info(f"PowerPoint saved: {output_path}")
+        return True
+    except Exception as e:
+        logger.error(f"PowerPoint creation failed: {e}")
+        return False
 
-        logging.info(f"Contents of /app/screenshots: {os.listdir(screenshot_directory)}")
+def main():
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    
+    driver = webdriver.Chrome(options=chrome_options)
+    screenshot_paths = []
+    
+    logger.info(f"Current working directory: {os.getcwd()}")
+    
+    try:
+        login_url = "http://localhost:5601"
+        driver.get(login_url)
+        time.sleep(5)
+        
+        logger.info('Started logging in...')
+        username = driver.find_element(By.NAME, "username")
+        password = driver.find_element(By.NAME, "password")
+        username.send_keys("elastic")
+        password.send_keys("kibana123")
+        password.send_keys(Keys.RETURN)
+        logger.info('Logged in....')
+        time.sleep(10)
+        
+        dashboard_urls = [
+            "http://localhost:5601/app/dashboards#/view/722b74f0-b882-11e8-a6d9-e546fe2bba5f?_g=(filters:!())",
+            "http://localhost:5601/app/dashboards#/view/7adfa750-4c81-11e8-b3d7-01146121b73d?_g=(filters:!())"
+        ]
+        
+        for i, url in enumerate(dashboard_urls, start=1):
+            logger.info('Taking screenshots...')
+            driver.get(url)
+            time.sleep(15)
+            
+            total_width = driver.execute_script("return document.body.scrollWidth")
+            total_height = driver.execute_script("return document.body.scrollHeight")
+            driver.set_window_size(total_width, total_height)
+            logger.info(f'H: {total_height} and W: {total_width}')
+            
+            # screenshot_directory = "/app/screenshots"
+            screenshot_directory = "/Users/app/poc/logstashexporter/screenshots"
+
+            if not os.path.exists(screenshot_directory):
+                os.makedirs(screenshot_directory)
+            
+            screenshot_path = os.path.join(screenshot_directory, f"kibana_dashboard_{i}.png")
+            driver.get_screenshot_as_file(screenshot_path)
+            screenshot_paths.append(screenshot_path)
+            logger.info(f"Screenshot saved: {screenshot_path}")
+        
+        # Create PowerPoint presentation
+        # template_path = '/app/screenshots/icrms.pptx'
+        template_path = "/Users/app/poc/logstashexporter/icrms.pptx"
+        # output_path = "/app/screenshots/template.pptx"
+        output_path = "/Users/app/poc/logstashexporter/template.pptx"
+        if create_powerpoint(screenshot_paths, template_path, output_path):
+            # Send email with PowerPoint attachment
+            subject = "Kibana Dashboard Report"
+            body = "Please find attached the Kibana dashboard report with screenshots."
+            send_email(subject, body, "aflavian@srxconsultant.com", output_path)
+            logger.info('email sent..')
+        
+    finally:
+        driver.quit()
+        # Clean up screenshots after sending
+        for path in screenshot_paths:
+            if os.path.exists(path):
+                os.remove(path)
+        logger.info('Cleaned up the screenshots')
 
 
-        # # Send email after screenshot is saved
-        # subject = f"Kibana Dashboard {i} - Screenshot"
-        # body = f"The screenshot for Kibana Dashboard {i} has been successfully captured and saved as {screenshot_path}."
-        # send_email(subject, body, "anselemo.flavian@outlook.com")
-
-finally:
-    logging.info('Done...')
-    driver.quit()  # Close the browser session
-
-
+if __name__ == "__main__":
+    main()
